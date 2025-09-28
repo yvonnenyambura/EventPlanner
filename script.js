@@ -1,6 +1,9 @@
+// script.js
+// Event Planner Application
+
 // Main App Controller
 const app = {
-    currentView: "home",
+    currentView: "dashboard",
     // list of events
     events: [],
     // user id
@@ -14,7 +17,7 @@ const app = {
         // setting up the listeners to allow reactivy when the data changes
         this.setupEventListeners();
         // this will be used to control the current page of view
-        this.showView("home");
+        this.showView("dashboard");
     },
 
     showView(viewName) {
@@ -212,6 +215,12 @@ const app = {
             });
         });
 
+        // Poster/file input handling
+        const posterInput = document.getElementById('event-poster');
+        if (posterInput) {
+            posterInput.addEventListener('change', (e) => this.handlePosterSelect(e));
+        }
+
         // Handle form submission
         form.addEventListener('submit', (e) => {
             e.preventDefault();
@@ -269,10 +278,10 @@ const app = {
             isValid = false;
             errorMessage = `Title must be between 3 and 100 characters (currently ${value.length})`;
         }
-        // Description validation - check length
-        else if (fieldName === 'description' && value && (value.length < 10 || value.length > 500)) {
+        // Description validation - check length (reduced minimum to 5 characters)
+        else if (fieldName === 'description' && value && (value.length < 5 || value.length > 500)) {
             isValid = false;
-            errorMessage = `Description must be between 10 and 500 characters (currently ${value.length})`;
+            errorMessage = `Description must be between 5 and 500 characters (currently ${value.length})`;
         }
         // Date validation - make sure it's not in the past
         else if (fieldName === 'date' && value) {
@@ -355,6 +364,7 @@ const app = {
         const event = {
             id: 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 11),
             ...eventData,
+            poster: this._pendingPosterDataUrl || null,
             organizer: this.currentUser,
             guests: [],
             createdAt: new Date().toISOString(),
@@ -377,11 +387,52 @@ const app = {
         const descCounter = document.getElementById('description-counter');
         if (titleCounter) titleCounter.textContent = '0';
         if (descCounter) descCounter.textContent = '0';
+        // Clear poster preview if any
+        const posterPreview = document.getElementById('poster-preview');
+        if (posterPreview) posterPreview.innerHTML = '';
 
         // Redirect to event details after a short delay
         setTimeout(() => {
             this.showEventDetails(event.id);
         }, 1500);
+    },
+
+    // Handle poster/file selection and preview
+    handlePosterSelect(e) {
+        const file = e.target.files && e.target.files[0];
+        const errorDiv = document.getElementById('poster-error');
+        const preview = document.getElementById('poster-preview');
+
+        // Clear previous
+        if (errorDiv) errorDiv.classList.add('hidden');
+        if (preview) preview.innerHTML = '';
+        this._pendingPosterDataUrl = null;
+
+        if (!file) return;
+
+        // Validate file type and size (max 2MB)
+        if (!file.type.startsWith('image/')) {
+            if (errorDiv) { errorDiv.textContent = 'Only image files are allowed'; errorDiv.classList.remove('hidden'); }
+            e.target.value = '';
+            return;
+        }
+        const maxSize = 2 * 1024 * 1024; // 2MB
+        if (file.size > maxSize) {
+            if (errorDiv) { errorDiv.textContent = 'File is too large (max 2MB)'; errorDiv.classList.remove('hidden'); }
+            e.target.value = '';
+            return;
+        }
+
+        // Read file as Data URL for preview and storage
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const dataUrl = ev.target.result;
+            this._pendingPosterDataUrl = dataUrl;
+            if (preview) {
+                preview.innerHTML = `<img src="${dataUrl}" alt="poster preview" class="w-full max-h-48 object-cover rounded-md" />`;
+            }
+        };
+        reader.readAsDataURL(file);
     },
 
     showEventDetails(eventId) {
@@ -499,7 +550,7 @@ const app = {
                     </div>
                     ${this.events.length === 0 ? `
                         <button class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium" data-view="create">
-                            ✨ Create Your First Event
+                            Create Your First Event
                         </button>
                     ` : `
                         <button class="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600 transition-colors" onclick="app.clearSearch()">
@@ -551,8 +602,14 @@ const app = {
         const rsvpStatus = userRSVP ? userRSVP.status : null;
 
         card.innerHTML = `
-            <div class="p-6">
+            <div class="">
+                ${event.poster ? `
+                    <div class="mb-4">
+                        <img src="${event.poster}" alt="${event.title} poster" class="w-full h-64 object-cover rounded-md mb-4" />
+                    </div>
+                ` : ''}
                 <!-- Header with title and status badge -->
+                <div class="p-6">
                 <div class="flex justify-between items-start mb-3">
                     <h3 class="text-xl font-semibold text-gray-800 line-clamp-2 flex-1">${event.title}</h3>
                     <div class="ml-3 flex flex-col items-end">
@@ -601,58 +658,70 @@ const app = {
                     <button class="text-blue-600 hover:text-blue-800 font-medium transition-colors" onclick="app.showEventDetails('${event.id}')">
                         View Details
                     </button>
-                    <button class="rsvp-btn px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${rsvpStatus === 'confirmed'
+                    ${event.organizer === this.currentUser ? `
+                        <div class="flex gap-2">
+                            <button class="text-red-600 hover:text-red-800 font-medium transition-colors" onclick="app.handleDeleteEvent('${event.id}', event)">
+                                Delete
+                            </button>
+                            <button class="rsvp-btn px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${rsvpStatus === 'confirmed'
                 ? 'bg-green-100 text-green-800 hover:bg-green-200'
                 : rsvpStatus === 'declined'
                     ? 'bg-red-100 text-red-800 hover:bg-red-200'
                     : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-md'
             }" onclick="app.handleQuickRSVP('${event.id}', event)">
-                        ${rsvpStatus === 'confirmed' ? 'Attending' :
+                                ${rsvpStatus === 'confirmed' ? 'Attending' :
                 rsvpStatus === 'declined' ? 'Declined' :
                     'RSVP'}
-                    </button>
+                            </button>
+                        </div>
+                    ` : `
+                        <button class="rsvp-btn px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${rsvpStatus === 'confirmed'
+                ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                : rsvpStatus === 'declined'
+                    ? 'bg-red-100 text-red-800 hover:bg-red-200'
+                    : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-md'
+            }" onclick="app.handleQuickRSVP('${event.id}', event)">
+                            ${rsvpStatus === 'confirmed' ? 'Attending' :
+                rsvpStatus === 'declined' ? 'Declined' :
+                    'RSVP'}
+                        </button>
+                    `}
                 </div>
             </div>
+        </div>
         `;
 
         return card;
     },
 
-    handleQuickRSVP(eventId, clickEvent) {
+    handleDeleteEvent(eventId, clickEvent) {
         clickEvent.stopPropagation();
 
         const event = this.events.find(e => e.id === eventId);
         if (!event) return;
 
-        const existingRSVP = event.guests.find(guest => guest.userId === this.currentUser);
-
-        if (existingRSVP) {
-            // Toggle between confirmed and declined
-            existingRSVP.status = existingRSVP.status === 'confirmed' ? 'declined' : 'confirmed';
-            existingRSVP.rsvpDate = new Date().toISOString();
-        } else {
-            // Add new RSVP
-            event.guests.push({
-                userId: this.currentUser,
-                name: 'Current User', // In a real app, this would be the actual user name
-                status: 'confirmed',
-                rsvpDate: new Date().toISOString()
-            });
+        // Confirm deletion
+        if (!confirm(`Are you sure you want to delete "${event.title}"? This action cannot be undone.`)) {
+            return;
         }
 
-        // Update the event
-        event.updatedAt = new Date().toISOString();
-        this.saveData();
+        // Remove event from array
+        const eventIndex = this.events.findIndex(e => e.id === eventId);
+        if (eventIndex !== -1) {
+            this.events.splice(eventIndex, 1);
+            this.saveData();
+        }
 
-        // Show feedback
-        const newStatus = existingRSVP ? existingRSVP.status : 'confirmed';
-        this.showToast(
-            newStatus === 'confirmed' ? 'RSVP confirmed!' : 'RSVP declined',
-            newStatus === 'confirmed' ? 'success' : 'info'
-        );
+        // Show success message
+        this.showToast('Event deleted successfully', 'success');
 
-        // Re-render the events list to update the button
-        this.renderEventsList();
+        // If we're currently viewing the deleted event, go back to events list
+        if (this.currentView === 'event-details' && this.currentEventId === eventId) {
+            this.showView('events');
+        } else {
+            // Re-render current view to update lists
+            this.initializeView(this.currentView);
+        }
     },
 
     clearSearch() {
@@ -733,6 +802,11 @@ const app = {
                     </span>
                 </div>
 
+                ${event.poster ? `
+                    <div class="mb-4">
+                        <img src="${event.poster}" alt="${event.title} poster" class="w-full max-h-64 object-cover rounded-md mb-4" />
+                    </div>
+                ` : ''}
                 <p class="text-gray-600 text-lg mb-6">${event.description}</p>
 
                 <!-- Event details grid -->
@@ -823,7 +897,14 @@ const app = {
                     </div>
                 </div>
                 <div class="mt-4">
-                    <button id="invite-button" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Invite</button>
+                    <div class="flex gap-3">
+                        <button id="invite-button" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Invite</button>
+                        ${event.organizer === this.currentUser ? `
+                            <button class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700" onclick="app.handleDeleteEvent('${event.id}', event)">
+                                Delete Event
+                            </button>
+                        ` : ''}
+                    </div>
                 </div>
             </div>
 
@@ -1026,10 +1107,10 @@ const app = {
                 <h3 class="text-xl font-bold text-gray-800 mb-4">Quick Actions</h3>
                 <div class="flex flex-wrap gap-4">
                     <button class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium" data-view="create">
-                        ✨ Create New Event
+                        Create New Event
                     </button>
                     <button class="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors font-medium" data-view="events">
-                        🔍 Browse Events
+                        Browse Events
                     </button>
                 </div>
             </div>
@@ -1129,6 +1210,9 @@ const app = {
                     </div>
                     <div class="flex items-center gap-2">
                         ${statusBadge}
+                        <button class="text-red-600 hover:text-red-800 text-sm" onclick="app.handleDeleteEvent('${event.id}', event)">
+                            Delete
+                        </button>
                         <button class="text-blue-600 hover:text-blue-800 text-sm" onclick="app.showEventDetails('${event.id}')">
                             View
                         </button>
@@ -1192,6 +1276,31 @@ document.addEventListener('DOMContentLoaded', () => {
     app.init();
 });
 
+/* Sidebar toggle and nav link behavior to match EventTrial look */
+try {
+    const toggleBtn = document.querySelector('.toggle-btn');
+    const sidebar = document.querySelector('.sidebar');
+    const navLinks = document.querySelectorAll('.nav-links a');
+
+    if (toggleBtn && sidebar) {
+        toggleBtn.addEventListener('click', () => {
+            sidebar.classList.toggle('collapsed');
+        });
+    }
+
+    navLinks.forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            navLinks.forEach(item => item.classList.remove('active'));
+            link.classList.add('active');
+            const view = link.getAttribute('data-view');
+            if (view) app.showView(view);
+        });
+    });
+} catch (e) {
+    // Non-fatal if DOM structure is different
+}
+
 
 // If left empty, the app will simulate sending email
 app.EMAILJS_USER_ID = '';
@@ -1226,77 +1335,64 @@ app.setupInviteModal = function () {
     document.addEventListener('click', (e) => {
         const el = e.target.closest && e.target.closest('#invite-button');
         if (el) {
+            console.log('Invite button clicked');
             e.preventDefault();
-            // Pre-fill message with event info when possible
-            const event = this.events.find(ev => ev.id === this.currentEventId);
-            if (event && inviteMessageInput) {
-                inviteMessageInput.value = `Hi! You're invited to ${event.title} on ${event.date} at ${event.time} at ${event.venue}.\n\n${event.description}`;
+            // Use Windows-style prompt for email
+            const toEmail = window.prompt('Enter recipient email:');
+            if (toEmail && toEmail.trim()) {
+                const message = window.prompt('Enter message (optional):') || '';
+                this.sendInvite(toEmail.trim(), message);
             }
-            if (inviteModal) inviteModal.classList.remove('hidden');
         }
     });
 
     // Close handlers
     if (inviteClose) inviteClose.addEventListener('click', () => inviteModal.classList.add('hidden'));
     if (inviteCancel) inviteCancel.addEventListener('click', () => inviteModal.classList.add('hidden'));
+};
 
-    // Send handler
-    if (inviteSend) inviteSend.addEventListener('click', async (e) => {
-        e.preventDefault();
-        const toEmail = inviteEmailInput.value.trim();
-        const message = inviteMessageInput.value.trim();
+app.sendInvite = function (toEmail, message) {
+    // Basic email validation
+    const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+    if (!emailRegex.test(toEmail)) {
+        this.showToast('Please enter a valid email', 'error');
+        return;
+    }
 
-        // Basic email validation
-        const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-        if (!emailRegex.test(toEmail)) {
-            inviteError.classList.remove('hidden');
-            return;
-        } else {
-            inviteError.classList.add('hidden');
-        }
+    // Prepare template params
+    const event = this.events.find(ev => ev.id === this.currentEventId) || {};
+    const templateParams = {
+        to_email: toEmail,
+        to_name: toEmail.split('@')[0],
+        event_title: event.title || 'An event',
+        event_date: event.date || '',
+        event_time: event.time || '',
+        event_venue: event.venue || '',
+        message: message || ''
+    };
 
-        // Prepare template params
-        const event = this.events.find(ev => ev.id === this.currentEventId) || {};
-        const templateParams = {
-            to_email: toEmail,
-            to_name: toEmail.split('@')[0],
-            event_title: event.title || 'An event',
-            event_date: event.date || '',
-            event_time: event.time || '',
-            event_venue: event.venue || '',
-            message: message || ''
-        };
-
-        // If EmailJS is configured, send real email. Otherwise, simulate.
-        if (app.EMAILJS_USER_ID && app.EMAILJS_SERVICE_ID && app.EMAILJS_TEMPLATE_ID && window.emailjs && typeof emailjs.send === 'function') {
-            try {
-                inviteSend.disabled = true;
-                inviteSend.textContent = 'Sending...';
-                const result = await emailjs.send(app.EMAILJS_SERVICE_ID, app.EMAILJS_TEMPLATE_ID, templateParams);
+    // If EmailJS is configured, send real email. Otherwise, simulate.
+    if (app.EMAILJS_USER_ID && app.EMAILJS_SERVICE_ID && app.EMAILJS_TEMPLATE_ID && window.emailjs && typeof emailjs.send === 'function') {
+        // Real send
+        emailjs.send(app.EMAILJS_SERVICE_ID, app.EMAILJS_TEMPLATE_ID, templateParams)
+            .then(result => {
                 console.log('EmailJS send result:', result);
                 this.showToast('Invitation sent!', 'success');
-                inviteModal.classList.add('hidden');
-            } catch (err) {
+            })
+            .catch(err => {
                 console.error('EmailJS send error', err);
                 this.showToast('Failed to send invitation. See console for details.', 'error');
-            } finally {
-                inviteSend.disabled = false;
-                inviteSend.textContent = 'Send Invite';
-            }
-        } else {
-            // Mock sending - just show success after a short delay
-            inviteSend.disabled = true;
-            inviteSend.textContent = 'Sending...';
-            setTimeout(() => {
-                console.log('Mock invite sent to', toEmail, 'with params', templateParams);
-                this.showToast(`Mock invite sent to ${toEmail}`, 'success');
-                inviteSend.disabled = false;
-                inviteSend.textContent = 'Send Invite';
-                inviteModal.classList.add('hidden');
-            }, 800);
-        }
-    });
+            });
+    } else {
+        // Mock sending
+        setTimeout(() => {
+            console.log('Mock invite sent to', toEmail, 'with params', templateParams);
+            this.showToast(`Mock invite sent to ${toEmail}`, 'success');
+        }, 800);
+    }
 };
+
+// Expose a small helper to set EmailJS config at runtime (useful for dev without editing files)
 
 // Expose a small helper to set EmailJS config at runtime (useful for dev without editing files)
 app.configureEmailJS = function ({ userId, serviceId, templateId }) {
