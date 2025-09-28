@@ -1,6 +1,3 @@
-// script.js
-// Event Planner Application
-
 // Main App Controller
 const app = {
     currentView: "home",
